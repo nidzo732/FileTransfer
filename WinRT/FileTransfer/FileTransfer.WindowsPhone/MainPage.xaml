@@ -1,0 +1,64 @@
+﻿<Page
+    x:Class="FileTransfer.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:FileTransfer"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Page.Resources>
+        <!-- TODO: Delete this line if the key AppName is declared in App.xaml -->
+        <x:String x:Key="AppName">My Application</x:String>
+        <MenuFlyout x:Name="peerContextMenu">
+            <MenuFlyoutItem x:Name="unpairButton" Text="Unpair" Click="unpairPeer"/>
+            <MenuFlyoutItem x:Name="deleteButton" Text="Delete" Click="deletePeer"/>
+        </MenuFlyout>
+    </Page.Resources>
+    <Page.BottomAppBar>
+        <CommandBar ClosedDisplayMode="Minimal">
+            <AppBarButton x:Name="rebootButton" Label="Restart networking" Icon="RepeatAll" Click="rebootNetworking"/>
+        </CommandBar>
+    </Page.BottomAppBar>
+    <Grid x:Name="LayoutRoot">
+
+        <Grid.ChildrenTransitions>
+            <TransitionCollection>
+                <EntranceThemeTransition/>
+            </TransitionCollection>
+        </Grid.ChildrenTransitions>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title Panel -->
+        <StackPanel Grid.Row="0" Margin="19,0">
+            <TextBlock Text="File transfer" Style="{ThemeResource TitleTextBlockStyle}" Margin="0,12"/>
+            <TextBox x:Name="deviceName" Margin="0,-6.5,0,26.5" PlaceholderText="Please enter device name"/>
+            <Button Content="Find devices" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Click="refreshPeerList"/>
+        </StackPanel>
+
+        <!--TODO: Content should be placed within the following grid-->
+        <Grid Grid.Row="1" x:Name="ContentRoot" Margin="19,9.5,19,0">
+            <ListView ItemsSource="{Binding}" x:Name="peerList" SelectionMode="None" IsItemClickEnabled="True" ItemClick="peerSelected">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel HorizontalAlignment="Stretch" RightTapped="peerRightClick" Holding="peerLongClick">
+                            <TextBlock Text="{Binding Guid}" Visibility="Collapsed"></TextBlock>
+                            <TextBlock Text="{Binding Name}" FontSize="28"></TextBlock>
+                            <TextBlock Text="{Binding SubText}" FontSize="14"></TextBlock>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+    </Grid>
+</Page>

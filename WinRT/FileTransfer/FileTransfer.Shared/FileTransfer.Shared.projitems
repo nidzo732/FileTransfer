@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>d2262de0-bd2a-4c8c-8dc6-074a863f2fcd</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>FileTransfer</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="$(MSBuildThisFileDirectory)App.xaml">
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Compile Include="$(MSBuildThisFileDirectory)App.xaml.cs">
+      <DependentUpon>App.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="$(MSBuildThisFileDirectory)Common\ContinuationManager.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Common\NavigationHelper.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Common\ObservableDictionary.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Common\RelayCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Common\SuspensionManager.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Communicator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Cryptography.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DataStorage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DialogBoxes.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Exception.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)GuidHandling.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)JSONHandling.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)MainPage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)MulticastDiscovery.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Networking.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Peer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Strings.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)TransferClasses.cs" />
+  </ItemGroup>
+</Project>
