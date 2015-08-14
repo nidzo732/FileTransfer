@@ -64,7 +64,7 @@ class UDPDiscovery(QObject):
                 responder.connect(address[0], DEFAULT_DISCOVERY_PORT)
                 responder.send((getStoredGuid() + ":" + myName).encode("utf-8"))
             except NetworkingError:
-                return
+                pass
 
     def startDiscoveryServer(self):
         responderThread = threading.Thread(target=UDPDiscovery.responseSenderThread, daemon=True)
