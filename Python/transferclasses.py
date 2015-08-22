@@ -69,21 +69,20 @@ class PairingRequest:
 
 class File:
     jsonKeys = {"contents": JSON_FILE_CONTENTS,
-                "publicKey": JSON_PUBLICKEY,
-                "signature": JSON_SIGNATURE,
                 "fileName": JSON_FILE_NAME}
 
-    def __init__(self, fileName, fileContents, signatureSecret, peerKey):
-        filePrivateKey = generateDHPrivate()
-        self.publicKey = calculateDHPublic(filePrivateKey)
-        self.signature = generateSignature(self.publicKey, signatureSecret)
-        aesKey = calculateDHAES(peerKey, filePrivateKey)
+    def __init__(self, fileName, fileContents, aesKey):
         self.contents = AESEncrypt(fileContents, aesKey)
         self.fileName = fileName
 
-    def verifySignature(self, signatureSecret):
-        return verifySignature(self.publicKey, signatureSecret, self.signature)
-
-    def getContents(self, privateKey):
-        aesKey = calculateDHAES(self.publicKey, privateKey)
+    def getContents(self, aesKey):
         return AESDecrypt(self.contents, aesKey, False)
+
+
+class PreSendRequest:
+    jsonKeys = {"fileName": JSON_FILE_NAME,
+                "publicKey": (JSON_PUBLICKEY, PublicKey)}
+
+    def __init__(self, fileName, publicKey):
+        self.publicKey = publicKey
+        self.fileName = fileName

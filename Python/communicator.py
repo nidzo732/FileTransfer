@@ -2,7 +2,7 @@ import threading
 from PyQt4 import QtCore
 from threading import Thread
 from PyQt4.QtCore import QSettings, QObject
-from cryptography import generateDHPrivate, calculateDHPublic
+from cryptography import generateDHPrivate, calculateDHPublic, calculateDHAES
 from dialogboxes import askForInput, askForConfirmation
 import dialogboxes
 from exception import FileTransferBaseException
@@ -12,7 +12,7 @@ import json
 from multicast import UDPDiscovery
 from networking import TCPSocket
 from storage import *
-from transferclasses import Peer, Request, PairingRequest, PublicKey, File
+from transferclasses import Peer, Request, PairingRequest, PublicKey, File, PreSendRequest
 from strings import *
 
 storedPeers = QSettings("FileTransfer", "peers")
@@ -98,16 +98,21 @@ class Communicator(QObject):
             requestHandlerThread.start()
 
     def receiverThread(self, socket):
-        receivedData = socket.recv(self.progressRepport)
-        self.progressStop()
-        self.requestReceivedSignal.emit(socket, receivedData)
+        try:
+            receivedData = socket.recv(self.progressRepport)
+            self.progressStop()
+            self.requestReceivedSignal.emit(socket, receivedData)
+        except FileTransferBaseException as e:
+            self.showMessageBox.emit(e.message)
 
     def requestReceived(self, socket, data):
-        receivedRequest = JSONToObject(Request, data.decode("utf-8"))
         try:
+            receivedRequest = JSONToObject(Request, data.decode("utf-8"))
             self.handlerMap[receivedRequest.type](socket, receivedRequest)
         except FileTransferBaseException as e:
             self.showMessageBox.emit(e.message)
+        except Exception as e:
+            self.showMessageBox.emit(str(e))
 
     def startRequestListener(self):
         thread = Thread(target=self.listenerThread, daemon=True)
@@ -189,13 +194,18 @@ class Communicator(QObject):
         try:
             self.progressIndeterminate()
             selectedPeer = self.peers[guid]
-            preSendSocket = self.sendRequestToPeer(guid, REQUEST_TYPE_PRE_SEND, fileName)
+            filePrivateKey = generateDHPrivate()
+            filePublicKey = calculateDHPublic(filePrivateKey)
+            preSendPublicKey = PublicKey(filePublicKey, self.peers[guid].sharedPassword)
+            preSendRequest = PreSendRequest(fileName, preSendPublicKey)
+            preSendSocket = self.sendRequestToPeer(guid, REQUEST_TYPE_PRE_SEND, objectToJSON(preSendRequest))
             response = preSendSocket.recv().decode("utf-8")
             if response == RESPONSE_NOT_PAIRED:
                 self.pair(guid, continueToSend=(fileName, fileContents, guid))
                 return
             elif response == RESPONSE_REJECT:
                 self.showMessageBox.emit("File rejected")
+                self.progressStop()
                 return
         except FileTransferBaseException as e:
             self.showMessageBox.emit(e.message)
@@ -203,11 +213,9 @@ class Communicator(QObject):
 
         def senderThread():
             try:
-                sentFile = File(fileName, fileContents, selectedPeer.sharedPassword, selectedPeer.publicKey)
-                responseSocket = self.sendRequestToPeer(guid, REQUEST_TYPE_SEND, objectToJSON(sentFile), 5)
-                response = responseSocket.recv().decode("utf-8")
-                if response != RESPONSE_OK:
-                    self.showMessageBox.emit(response)
+                aesKey = calculateDHAES(selectedPeer.publicKey, filePrivateKey)
+                sentFile = File(fileName, fileContents, aesKey)
+                self.sendRequestToPeer(guid, REQUEST_TYPE_SEND, objectToJSON(sentFile), 5)
                 self.progressStop()
             except FileTransferBaseException as e:
                 self.showMessageBox.emit(e.message)
@@ -217,7 +225,8 @@ class Communicator(QObject):
 
     def handlePairRequest(self, socket, request):
         requestData = JSONToObject(PairingRequest, request.data)
-        signatureSecret = askForInput(self.parent, "Pairing request from "+requestData.name+". Enter shared password:")
+        signatureSecret = askForInput(self.parent,
+                                      "Pairing request from " + requestData.name + ". Enter shared password:")
 
         def handlerThread():
             try:
@@ -252,10 +261,14 @@ class Communicator(QObject):
 
     def handlePreSendRequest(self, socket, request):
         if (request.guid in self.peers) and self.peers[request.guid].sharedPassword:
-            fileName = request.data
+            preSendRequest = JSONToObject(PreSendRequest, request.data)
+            if not preSendRequest.publicKey.verifySignature(self.peers[request.guid].sharedPassword):
+                socket.send(RESPONSE_BAD_SIGNATURE)
+                return
             if askForConfirmation(self.parent,
-                                  "Accept file " + fileName + " from " + self.peers[request.guid].name + "?"):
-                self.preSendRegistrations[request.guid] = True
+                                  "Accept file " + preSendRequest.fileName + " from " + self.peers[
+                                      request.guid].name + "?"):
+                self.preSendRegistrations[request.guid] = preSendRequest
                 socket.send(RESPONSE_OK)
             else:
                 socket.send(RESPONSE_REJECT)
@@ -267,15 +280,17 @@ class Communicator(QObject):
             self.progressIndeterminate()
             socket.setTimeout(5)
             if not ((request.guid in self.preSendRegistrations) and self.preSendRegistrations[request.guid]):
-                socket.send(RESPONSE_REJECT)
+                self.showMessageBox.emit("No presend registration")
                 return
+            registration = self.preSendRegistrations[request.guid]
             self.preSendRegistrations[request.guid] = False
             receivedFile = JSONToObject(File, request.data)
-            if not receivedFile.verifySignature(self.peers[request.guid].sharedPassword):
-                socket.send(RESPONSE_BAD_SIGNATURE)
+            if registration.fileName != receivedFile.fileName:
+                self.showMessageBox.emit("Name mismatch, rejected")
+                self.progressStop()
                 return
-            socket.send(RESPONSE_OK)
-            fileContents = receivedFile.getContents(self.peers[request.guid].myPrivateKey)
+            aesKey = calculateDHAES(registration.publicKey.key, self.peers[request.guid].myPrivateKey)
+            fileContents = receivedFile.getContents(aesKey)
             self.fileReceived.emit(receivedFile.fileName, fileContents)
             self.progressStop()
 

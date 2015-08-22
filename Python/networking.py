@@ -58,7 +58,6 @@ class TCPSocket:
                     progressCallback(len(receivedData) / messageLength * 100)
             return receivedData
         except OSError as e:
-            print(e)
             raise NetworkingError("failed to receive data")
 
     def send(self, data, progressCallback=None):
