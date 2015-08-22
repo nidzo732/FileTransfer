@@ -14,5 +14,13 @@ namespace FileTransfer
                 return errorText;
             }
         }
+        public FileTransferException(String message)
+        {
+            errorText = message;
+        }
+        public FileTransferException()
+        {
+            errorText = "";
+        }
     }
 }

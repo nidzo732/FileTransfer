@@ -69,6 +69,7 @@ namespace FileTransfer
             {
                 string ip = sender.GetIP();
                 string receivedString = await sender.Recv();
+                if (receivedString.IndexOf(":") == -1 || receivedString.IndexOf(":") == receivedString.Length-1) return;
                 string guid = receivedString.Substring(0, receivedString.IndexOf(":"));
                 if (guid == (await GuidHandling.GetMyGuid())) return;
                 string name = receivedString.Substring(receivedString.IndexOf(":") + 1);

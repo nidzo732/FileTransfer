@@ -12,6 +12,14 @@ namespace FileTransfer
         public string SenderGuid;
     }
     [DataContract]
+    public class PreSendRequest
+    {
+        [DataMember(Name = Strings.JSON_FILE_NAME)]
+        public string FileName;
+        [DataMember(Name = Strings.JSON_PUBLICKEY)]
+        public PublicKey key;
+    }
+    [DataContract]
     public class PublicKey
     {
         [DataMember(Name=Strings.JSON_PUBLICKEY)]
@@ -47,33 +55,21 @@ namespace FileTransfer
     {
         [DataMember(Name = Strings.JSON_FILE_CONTENTS)]
         public string Contents;
-        [DataMember(Name = Strings.JSON_PUBLICKEY)]
-        public string PublicKey;
-        [DataMember(Name = Strings.JSON_SIGNATURE)]
-        public string Signature;
         [DataMember(Name=Strings.JSON_FILE_NAME)]
         public string FileName;
         public File()
         {
 
         }
-        public File(string fileName, byte[] fileContents, string signatureSecret, string peerKey)
+        public File(string fileName, byte[] fileContents, byte[] aesKey)
         {
             string filePrivateKey = Cryptography.DiffieHellman.generate_DH_Private();
-            PublicKey = Cryptography.DiffieHellman.calculate_DH_Public(filePrivateKey);
-            Signature = Cryptography.Signatures.GenerateSignature(signatureSecret, PublicKey);
-            byte[] encryptionKey = Cryptography.DiffieHellman.calculate_DH_AES(peerKey, filePrivateKey);
-            Contents = Cryptography.AES.Encrypt(fileContents, encryptionKey);
+            Contents = Cryptography.AES.Encrypt(fileContents, aesKey);
             FileName = fileName;
 
         }
-        public bool CheckSignature(string signatureSecret)
+        public byte[] GetContents(byte[] aesKey)
         {
-            return Cryptography.Signatures.VerifySignature(signatureSecret, PublicKey, Signature);
-        }
-        public byte[] GetContents(string privateKey)
-        {
-            byte[] aesKey = Cryptography.DiffieHellman.calculate_DH_AES(PublicKey, privateKey);
             return Cryptography.AES.Decrypt(Contents, aesKey);
         }
     }

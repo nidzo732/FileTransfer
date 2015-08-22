@@ -13,7 +13,7 @@ namespace FileTransfer
     {
         public static ObservableCollection<Peer> Peers;
         private static Dictionary<string, Peer> peerMap;
-        private static Dictionary<string, bool> preSendRegistrations;
+        private static Dictionary<string, PreSendRequest> preSendRegistrations;
         private static string myName;
         private static TCPSocket listenerSocket;
         private static Dictionary<string, Func<string, string, TCPSocket, Task>> requestHandlerMap;
@@ -29,7 +29,7 @@ namespace FileTransfer
             if (uiThreadDispatcher == null) uiThreadDispatcher = Windows.UI.Core.CoreWindow.GetForCurrentThread().Dispatcher;
             myName = name;
             Peers = new ObservableCollection<Peer>();
-            preSendRegistrations = new Dictionary<string, bool>();
+            preSendRegistrations = new Dictionary<string, PreSendRequest>();
             listenerSocket = new TCPSocket();
             listenerSocket.ConnectionReceived += requestReceived;
             initializeHandlerMap();
@@ -293,7 +293,13 @@ namespace FileTransfer
             {
                 progressIndeterminate();
                 Peer selectedPeer = peerMap[peer];
-                var preSendSocket = await sendRequestToPeer(peer, Strings.REQUEST_TYPE_PRE_SEND, fileName, timeout:0);
+                PreSendRequest preSend = new PreSendRequest();
+                String filePrivateKey = DiffieHellman.generate_DH_Private();
+                String filePublicKey = DiffieHellman.calculate_DH_Public(filePrivateKey);
+                byte[] aesKey = DiffieHellman.calculate_DH_AES(selectedPeer.PublicKey, filePrivateKey);
+                preSend.FileName = fileName;
+                preSend.key = new PublicKey(filePublicKey, selectedPeer.SharedPassword);
+                var preSendSocket = await sendRequestToPeer(peer, Strings.REQUEST_TYPE_PRE_SEND, JSONHandling.SerializeObject(preSend), timeout:0);
                 var response = await preSendSocket.Recv();
                 if (response == Strings.RESPONSE_NOT_PAIRED)
                 {
@@ -307,14 +313,9 @@ namespace FileTransfer
                     progressStop();
                     return;
                 }
-                File sentFile = new File(fileName, fileContents, selectedPeer.SharedPassword, selectedPeer.PublicKey);
-                var responseSocket = await sendRequestToPeer(peer, Strings.REQUEST_TYPE_SEND, JSONHandling.SerializeObject(sentFile), true);
-                response = await responseSocket.Recv();
+                File sentFile = new File(fileName, fileContents, aesKey);
+                await sendRequestToPeer(peer, Strings.REQUEST_TYPE_SEND, JSONHandling.SerializeObject(sentFile), true);
                 progressStop();
-                if (response != Strings.RESPONSE_OK)
-                {
-                    await DialogBoxes.ShowMessageBox(response);
-                }
             }
             catch (FileTransferException error)
             {
@@ -338,22 +339,22 @@ namespace FileTransfer
                 await socket.Send(Strings.RESPONSE_NOT_PAIRED);
                 return;
             }
-            if (!(preSendRegistrations.ContainsKey(peer) && preSendRegistrations[peer]))
+            if (!(preSendRegistrations.ContainsKey(peer)))
             {
                 progressStop();
                 await socket.Send(Strings.RESPONSE_REJECT);
                 return;
             }
-            else preSendRegistrations[peer] = false;
+            PreSendRequest registration = preSendRegistrations[peer];
+            preSendRegistrations.Remove(peer);
             File receivedFile = JSONHandling.ParseJSONResponse<File>(data);
-            if(!receivedFile.CheckSignature(peerMap[peer].SharedPassword))
+            if(receivedFile.FileName!=registration.FileName)
             {
                 progressStop();
-                await socket.Send(Strings.RESPONSE_BAD_SIGNATURE);
-                return;
+                throw new FileTransferException("File name mismatch");
             }
-            await socket.Send(Strings.RESPONSE_OK);
-            byte[] fileContents = receivedFile.GetContents(peerMap[peer].MyPrivateKey);
+            byte[] aesKey = DiffieHellman.calculate_DH_AES(registration.key.Key, peerMap[peer].MyPrivateKey);
+            byte[] fileContents = receivedFile.GetContents(aesKey);
             progressStop();
             FileReceived(receivedFile.FileName, fileContents);
         }
@@ -362,10 +363,14 @@ namespace FileTransfer
         {
             if(peerMap.ContainsKey(peer) && peerMap[peer].Paired)
             {
-                string fileName = data;
-                await DialogBoxes.AskForConfirmation(fileName+" from "+peerMap[peer].Name+". Accept?", async () =>
+                PreSendRequest registration = JSONHandling.ParseJSONResponse<PreSendRequest>(data);
+                if(!registration.key.VerifySignature(peerMap[peer].SharedPassword))
                 {
-                    preSendRegistrations[peer] = true;
+                    socket.Send(Strings.RESPONSE_REJECT);
+                }
+                await DialogBoxes.AskForConfirmation(registration.FileName+" from "+peerMap[peer].Name+". Accept?", async () =>
+                {
+                    preSendRegistrations[peer] = registration;
                     await socket.Send(Strings.RESPONSE_OK);
                 }, async () =>
                 {
