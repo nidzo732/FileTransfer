@@ -21,6 +21,7 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progressIndicator;
     private FileHandling fileHandling;
     private String selectedPeerGuid;
+    private Intent fileToSendIntent;
     private TextWatcher deviceNameChangedWatcher = new TextWatcher() {
         @Override
         public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -41,6 +42,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Intent intent = getIntent();
+        if (intent.getAction().equals(Intent.ACTION_SEND)) {
+            fileToSendIntent = intent;
+        }
         setContentView(R.layout.activity_main);
     }
 
@@ -101,7 +106,7 @@ public class MainActivity extends AppCompatActivity {
         progressIndicator.setIndeterminate(true);
     }
 
-    public void progressRepport(double progress) {
+    public void progressReport(double progress) {
         progressIndicator.setIndeterminate(false);
         progressIndicator.setVisibility(View.VISIBLE);
         int progressValue = (int) (progress * 100);
@@ -136,7 +141,10 @@ public class MainActivity extends AppCompatActivity {
 
     public void sendFile(String guid) {
         selectedPeerGuid = guid;
-        fileHandling.selectFileToSend();
+        if (fileToSendIntent != null) {
+            communicator.sendFile(guid, fileToSendIntent);
+            fileToSendIntent = null;
+        } else fileHandling.selectFileToSend();
     }
 
     @Override

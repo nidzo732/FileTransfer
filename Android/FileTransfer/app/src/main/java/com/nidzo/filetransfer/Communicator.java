@@ -14,20 +14,129 @@ import com.nidzo.filetransfer.transferclasses.PreSendRequest;
 import com.nidzo.filetransfer.transferclasses.PublicKey;
 import com.nidzo.filetransfer.transferclasses.Request;
 
-import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.Iterator;
 
 public class Communicator {
     private MainActivity owner;
-    private ArrayList<Peer> peers;
-    private Hashtable<String, Peer> peerMap;
+    private HashMap<String, Peer> peers;
     private MulticastDiscovery discovery;
     private TCPSocket listenerSocket;
     private Hashtable<String, PreSendRequest> preSendRegistrations;
     private FileHandling fileHandling;
+    private Hashtable<String, RequestHandler> requestHandlers;
+    private RequestHandler pairingHandler = new RequestHandler() {
+        @Override
+        public void handle(TCPSocket socket, Request request) throws FileTransferException {
+            progressIndeterminate();
+            final PairingRequest pairingRequest = new PairingRequest();
+            JSONHandling.deserializeObject(request.getData(), pairingRequest);
+            String secret = DialogBoxes.showInputBox(
+                    "Pairing request",
+                    "Pairing request from " + pairingRequest.getName() + " please enter shared password",
+                    owner);
+            if (secret == null || secret.equals("")) {
+                progressStop();
+                socket.send(Strings.RESPONSE_REJECT);
+                return;
+            }
+            if (!pairingRequest.getPublicKey().verifySignature(secret)) {
+                progressStop();
+                notifyError("Shared passwords don't match");
+                socket.send(Strings.RESPONSE_BAD_SIGNATURE);
+                return;
+            }
+            String myPrivateKey = DiffieHellman.generatePrivate();
+            String myPublicKey = DiffieHellman.calculatePublic(myPrivateKey);
+            PublicKey returnedKey = new PublicKey(myPublicKey, secret);
+            sendRequestToSocket(socket, Strings.REQYEST_TYPE_PUBLICKEY, JSONHandling.serializeObject(returnedKey), 5000);
+            String response = socket.recv();
+            progressStop();
+            if (!response.equals(Strings.RESPONSE_OK)) {
+                notifyError(response);
+                return;
+            }
+            Peer newPeer;
+            if (peers.containsKey(pairingRequest.getGuid())) {
+                newPeer = peers.get(pairingRequest.getGuid());
+            } else {
+                newPeer = new Peer();
+                peers.put(pairingRequest.getGuid(), newPeer);
+            }
+            newPeer.setIP(socket.ipAddress());
+            newPeer.pair(secret, pairingRequest.getPublicKey().getKey(), myPrivateKey);
+            storePeers();
+            owner.updatePeerList();
+        }
+    };
+    private RequestHandler preSendHandler = new RequestHandler() {
+        @Override
+        public void handle(TCPSocket socket, Request request) throws FileTransferException {
+            if ((!peers.containsKey(request.getSenderGuid())) || (!peers.get(request.getSenderGuid()).isPaired())) {
+                socket.send(Strings.RESPONSE_NOT_PAIRED);
+                return;
+            }
+            PreSendRequest receivedRequest = new PreSendRequest();
+            JSONHandling.deserializeObject(request.getData(), receivedRequest);
+            if (!receivedRequest.getPublicKey().verifySignature(peers.get(request.getSenderGuid()).getSharedPassword())) {
+                try {
+                    socket.send(Strings.RESPONSE_BAD_SIGNATURE);
+                } catch (FileTransferException ignored) {
+                    return;
+                }
+            }
+            progressIndeterminate();
+            boolean acceptFile = DialogBoxes.showConfirmationBox("File received",
+                    "Accept file '" + receivedRequest.getFileName() + "' from " + peers.get(request.getSenderGuid()).getName(),
+                    owner);
+            if (!acceptFile) {
+                socket.send(Strings.RESPONSE_REJECT);
+            } else {
+                preSendRegistrations.remove(request.getSenderGuid());
+                preSendRegistrations.put(request.getSenderGuid(), receivedRequest);
+                socket.send(Strings.RESPONSE_OK);
+            }
+            progressStop();
+        }
+    };
+    private RequestHandler sendHandler = new RequestHandler() {
+        @Override
+        public void handle(TCPSocket socket, Request request) throws FileTransferException {
+            if ((!peers.containsKey(request.getSenderGuid())) || (!peers.get(request.getSenderGuid()).isPaired())) {
+                notifyError("Not paired");
+                progressStop();
+                return;
+            }
+            if (!preSendRegistrations.containsKey(request.getSenderGuid())) {
+                notifyError("No pre-send registration");
+                progressStop();
+                return;
+            }
+            progressIndeterminate();
+            PreSendRequest registration = preSendRegistrations.get(request.getSenderGuid());
+            preSendRegistrations.remove(request.getSenderGuid());
+            Peer selectedPeer = peers.get(request.getSenderGuid());
+            String aesKey = DiffieHellman.calculateAESKey(selectedPeer.getMyPrivateKey(), registration.getPublicKey().getKey());
+            File receivedFile = new File();
+            JSONHandling.deserializeObject(request.getData(), receivedFile);
+            if (!receivedFile.getFileName().equals(registration.getFileName())) {
+                notifyError("Name mismatch, rejected");
+                progressStop();
+                return;
+            }
+            byte[] fileContents = receivedFile.getFileContents(aesKey);
+            java.io.File savedFile = fileHandling.saveFile(fileContents, receivedFile.getFileName());
+            progressStop();
+            if (DialogBoxes.showConfirmationBox("File received",
+                    "File received and saved to downloads folder. Do you want to try to open it?", owner)) {
+                owner.fileReceived(savedFile);
+            }
+        }
+    };
 
     public Communicator(MainActivity ownerActivity) throws FileTransferException {
         owner = ownerActivity;
@@ -35,18 +144,25 @@ public class Communicator {
         loadPeers();
         discovery = new MulticastDiscovery(ownerActivity, this);
         preSendRegistrations = new Hashtable<>();
+        setRequestHandlers();
         startRequestListener();
     }
 
+    public void setRequestHandlers() {
+        requestHandlers = new Hashtable<>();
+        requestHandlers.put(Strings.REQUEST_TYPE_PAIR, pairingHandler);
+        requestHandlers.put(Strings.REQUEST_TYPE_PRE_SEND, preSendHandler);
+        requestHandlers.put(Strings.REQUEST_TYPE_SEND, sendHandler);
+    }
+
     public void deletePeer(String guid) throws FileTransferException {
-        getPeers().remove(peerMap.get(guid));
-        peerMap.remove(guid);
+        peers.remove(guid);
         storePeers();
         owner.updatePeerList();
     }
 
     public void unpairPeer(String guid) throws FileTransferException {
-        Peer peer = peerMap.get(guid);
+        Peer peer = peers.get(guid);
         peer.unpair();
         storePeers();
         owner.updatePeerList();
@@ -54,13 +170,12 @@ public class Communicator {
 
     private void storePeers() throws FileTransferException {
         try {
-            String[] peersToStore = new String[getPeers().size()];
-            for (int i = 0; i < peersToStore.length; i++) {
-                peersToStore[i] = JSONHandling.serializeObject(getPeers().get(i));
+            HashMap<String, String> peersToStore = new HashMap<>();
+            for (String peerKey : peers.keySet()) {
+                peersToStore.put(peerKey, JSONHandling.serializeObject(peers.get(peerKey)));
             }
-            JSONArray array = new JSONArray();
-            for (String peer : peersToStore) array.put(peer);
-            DataStorage.storeItem("PEERS", array.toString(), owner);
+            JSONObject storedObject = new JSONObject(peersToStore);
+            DataStorage.storeItem("PEERS_MAP", storedObject.toString(), owner);
         } catch (FileTransferException e) {
             throw new FileTransferException("Storage failure, the application might fail to work");
         }
@@ -68,15 +183,15 @@ public class Communicator {
 
     private void loadPeers() throws FileTransferException {
         try {
-            peerMap = new Hashtable<>();
-            peers = new ArrayList<>();
-            if (DataStorage.getStoredItem("PEERS", owner) == null) return;
-            JSONArray storedPeersArray = new JSONArray(DataStorage.getStoredItem("PEERS", owner));
-            for (int i = 0; i < storedPeersArray.length(); i++) {
-                Peer addedPeer = new Peer();
-                JSONHandling.deserializeObject(storedPeersArray.getString(i), addedPeer);
-                getPeers().add(addedPeer);
-                peerMap.put(addedPeer.getGuid(), addedPeer);
+            peers = new HashMap<>();
+            if (DataStorage.getStoredItem("PEERS_MAP", owner) == null) return;
+            JSONObject storedPeers = new JSONObject(DataStorage.getStoredItem("PEERS_MAP", owner));
+            Iterator<String> peersIterator = storedPeers.keys();
+            while (peersIterator.hasNext()) {
+                String guid = peersIterator.next();
+                Peer newPeer = new Peer();
+                JSONHandling.deserializeObject(storedPeers.getString(guid), newPeer);
+                peers.put(guid, newPeer);
             }
         } catch (JSONException e) {
             throw new FileTransferException("JSON Failure");
@@ -99,11 +214,11 @@ public class Communicator {
         );
     }
 
-    public void progressRepport(final double progress) {
+    public void progressReport(final double progress) {
         owner.runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    owner.progressRepport(progress);
+                                    owner.progressReport(progress);
                                 }
                             }
         );
@@ -134,15 +249,14 @@ public class Communicator {
 
     public void peerDiscovered(String guid, String name, String ip) {
         if (guid.equals(Identification.getGuid(owner))) return;
-        if (peerMap.containsKey(guid)) {
-            Peer modifiedPeer = peerMap.get(guid);
+        if (peers.containsKey(guid)) {
+            Peer modifiedPeer = peers.get(guid);
             modifiedPeer.setName(name);
             modifiedPeer.setIP(ip);
         } else {
             Peer newPeer = new Peer(guid, name);
             newPeer.setIP(ip);
-            getPeers().add(newPeer);
-            peerMap.put(guid, newPeer);
+            peers.put(guid, newPeer);
         }
         try {
             storePeers();
@@ -190,19 +304,21 @@ public class Communicator {
             socket.setProgressHandler(new TransferProgressHandler() {
                 @Override
                 public void handleProgress(double progress) {
-                    progressRepport(progress);
+                    progressReport(progress);
                 }
             });
             JSONHandling.deserializeObject(socket.recv(), request);
-            if (request.getType().equals(Strings.REQUEST_TYPE_PAIR))
-                handlePairingRequest(socket, request);
-            if (request.getType().equals(Strings.REQUEST_TYPE_PRE_SEND))
-                handlePreSendRequest(socket, request);
-            if (request.getType().equals(Strings.REQUEST_TYPE_SEND))
-                handleSendRequest(socket, request);
+            if (requestHandlers.containsKey(request.getType())) {
+                requestHandlers.get(request.getType()).handle(socket, request);
+            }
         } catch (FileTransferException error) {
             progressStop();
             notifyError(error.getMessage());
+        }
+        catch (Exception error)
+        {
+            progressStop();
+            notifyError("Unknown error "+error.getMessage()+" "+error.toString());
         }
     }
 
@@ -211,10 +327,10 @@ public class Communicator {
         peerSocket.setProgressHandler(new TransferProgressHandler() {
             @Override
             public void handleProgress(double progress) {
-                progressRepport(progress);
+                progressReport(progress);
             }
         });
-        peerSocket.connect(peerMap.get(guid).getIP(), 32102);
+        peerSocket.connect(peers.get(guid).getIP(), 32102);
         sendRequestToSocket(peerSocket, type, data, timeout);
         return peerSocket;
     }
@@ -223,109 +339,6 @@ public class Communicator {
         Request sentRequest = new Request(type, data, Identification.getGuid(owner));
         socket.setTimeout(timeout);
         socket.send(JSONHandling.serializeObject(sentRequest));
-    }
-
-    private void handlePairingRequest(final TCPSocket socket, final Request request) throws FileTransferException {
-        progressIndeterminate();
-        final PairingRequest pairingRequest = new PairingRequest();
-        JSONHandling.deserializeObject(request.getData(), pairingRequest);
-        String secret = DialogBoxes.showInputBox(
-                "Pairing request",
-                "Pairing request from " + pairingRequest.getName() + " please enter shared password",
-                owner);
-        if (secret == null || secret.equals("")) {
-            progressStop();
-            socket.send(Strings.RESPONSE_REJECT);
-            return;
-        }
-        if (!pairingRequest.getPublicKey().verifySignature(secret)) {
-            progressStop();
-            notifyError("Shared passwords don't match");
-            socket.send(Strings.RESPONSE_BAD_SIGNATURE);
-            return;
-        }
-        String myPrivateKey = DiffieHellman.generatePrivate();
-        String myPublicKey = DiffieHellman.calculatePublic(myPrivateKey);
-        PublicKey returnedKey = new PublicKey(myPublicKey, secret);
-        sendRequestToSocket(socket, Strings.REQYEST_TYPE_PUBLICKEY, JSONHandling.serializeObject(returnedKey), 5000);
-        String response = socket.recv();
-        progressStop();
-        if (!response.equals(Strings.RESPONSE_OK)) {
-            notifyError(response);
-            return;
-        }
-        Peer newPeer;
-        if (peerMap.containsKey(pairingRequest.getGuid())) {
-            newPeer = peerMap.get(pairingRequest.getGuid());
-        } else {
-            newPeer = new Peer();
-            getPeers().add(newPeer);
-            peerMap.put(pairingRequest.getGuid(), newPeer);
-        }
-        newPeer.setIP(socket.ipAddress());
-        newPeer.pair(secret, pairingRequest.getPublicKey().getKey(), myPrivateKey);
-        storePeers();
-        owner.updatePeerList();
-    }
-
-    private void handlePreSendRequest(TCPSocket socket, Request request) throws FileTransferException {
-        if ((!peerMap.containsKey(request.getSenderGuid())) || peerMap.get(request.getSenderGuid()).getSharedPassword() == null) {
-            socket.send(Strings.RESPONSE_NOT_PAIRED);
-            return;
-        }
-        PreSendRequest receivedRequest = new PreSendRequest();
-        JSONHandling.deserializeObject(request.getData(), receivedRequest);
-        if (!receivedRequest.getPublicKey().verifySignature(peerMap.get(request.getSenderGuid()).getSharedPassword())) {
-            try {
-                socket.send(Strings.RESPONSE_BAD_SIGNATURE);
-            } catch (FileTransferException ignored) {
-                return;
-            }
-        }
-        progressIndeterminate();
-        boolean acceptFile = DialogBoxes.showConfirmationBox("File received",
-                "Accept file '" + receivedRequest.getFileName() + "' from " + peerMap.get(request.getSenderGuid()).getName(),
-                owner);
-        if (!acceptFile) {
-            socket.send(Strings.RESPONSE_REJECT);
-        } else {
-            preSendRegistrations.remove(request.getSenderGuid());
-            preSendRegistrations.put(request.getSenderGuid(), receivedRequest);
-            socket.send(Strings.RESPONSE_OK);
-        }
-        progressStop();
-    }
-
-    private void handleSendRequest(TCPSocket socket, Request request) throws FileTransferException {
-        if ((!peerMap.containsKey(request.getSenderGuid())) || peerMap.get(request.getSenderGuid()).getSharedPassword() == null) {
-            notifyError("Not paired");
-            progressStop();
-            return;
-        }
-        if (!preSendRegistrations.containsKey(request.getSenderGuid())) {
-            notifyError("No presend registration");
-            progressStop();
-            return;
-        }
-        progressIndeterminate();
-        PreSendRequest registration = preSendRegistrations.get(request.getSenderGuid());
-        preSendRegistrations.remove(request.getSenderGuid());
-        Peer selectedPeer = peerMap.get(request.getSenderGuid());
-        String aesKey = DiffieHellman.calculateAESKey(selectedPeer.getMyPrivateKey(), registration.getPublicKey().getKey());
-        File receivedFile = new File();
-        JSONHandling.deserializeObject(request.getData(), receivedFile);
-        if (!receivedFile.getFileName().equals(registration.getFileName())) {
-            notifyError("Name mismatch, rejected");
-            progressStop();
-            return;
-        }
-        byte[] fileContents = receivedFile.getFileContents(aesKey);
-        java.io.File savedFile = fileHandling.saveFile(fileContents, receivedFile.getFileName());
-        progressStop();
-        if (DialogBoxes.showConfirmationBox("File received",
-                "File received and saved to downloads folder. Do you want to try to open it?", owner)) {
-            owner.fileReceived(savedFile);
-        }
     }
 
     public void pair(final String guid) {
@@ -345,7 +358,7 @@ public class Communicator {
                 progressStop();
                 return;
             }
-            Peer peer = peerMap.get(guid);
+            Peer peer = peers.get(guid);
             String myPrivateKey = DiffieHellman.generatePrivate();
             String myPublicKey = DiffieHellman.calculatePublic(myPrivateKey);
             PairingRequest request = new PairingRequest(Identification.getName(owner), Identification.getGuid(owner), new PublicKey(myPublicKey, secret));
@@ -393,7 +406,7 @@ public class Communicator {
             progressIndeterminate();
             byte[] fileContents = fileHandling.getFileContents(openFileResult);
             String fileName = fileHandling.getFileName(openFileResult);
-            Peer selectedPeer = peerMap.get(guid);
+            Peer selectedPeer = peers.get(guid);
             String filePrivateKey = DiffieHellman.generatePrivate();
             String filePublicKey = DiffieHellman.calculatePublic(filePrivateKey);
             PublicKey preSendKey = new PublicKey(filePublicKey, selectedPeer.getSharedPassword());
@@ -411,10 +424,18 @@ public class Communicator {
         } catch (FileTransferException error) {
             notifyError(error.toString() + "->" + error.getMessage());
         }
+        catch (OutOfMemoryError error)
+        {
+            notifyError("File too big to fit in memory");
+        }
         progressStop();
     }
 
-    public ArrayList<Peer> getPeers() {
+    public HashMap<String, Peer> getPeers() {
         return peers;
+    }
+
+    private interface RequestHandler {
+        void handle(final TCPSocket socket, final Request request) throws FileTransferException;
     }
 }

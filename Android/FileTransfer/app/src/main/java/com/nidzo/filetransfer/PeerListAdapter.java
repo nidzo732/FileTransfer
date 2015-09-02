@@ -13,7 +13,9 @@ import android.widget.TextView;
 import com.nidzo.filetransfer.transferclasses.Peer;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 
 public class PeerListAdapter extends ArrayAdapter<Peer> {
@@ -28,8 +30,12 @@ public class PeerListAdapter extends ArrayAdapter<Peer> {
         inflater = (LayoutInflater) owner.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
     }
 
-    public void reset(List<Peer> newPeers) {
+    public void reset(HashMap<String, Peer> peers) {
         this.clear();
+        ArrayList<Peer> newPeers = new ArrayList<>();
+        for (Map.Entry<String, Peer> entry : peers.entrySet()) {
+            newPeers.add(entry.getValue());
+        }
         this.addAll(newPeers);
         this.peers = newPeers;
         this.notifyDataSetChanged();
@@ -70,12 +76,12 @@ public class PeerListAdapter extends ArrayAdapter<Peer> {
             }
         }
         View rootLayout = rowView.findViewById(R.id.rootLayout);
-        rootLayout.setOnLongClickListener(new PeerLongClickListner(currentPeer, owner, rootLayout));
+        rootLayout.setOnLongClickListener(new PeerLongClickListener(currentPeer, owner, rootLayout));
         rootLayout.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (currentPeer.getIP() != null) {
-                    if (currentPeer.getSharedPassword() == null) {
+                    if (!currentPeer.isPaired()) {
                         owner.pair(currentPeer.getGuid());
                     } else {
                         owner.sendFile(currentPeer.getGuid());
@@ -87,12 +93,12 @@ public class PeerListAdapter extends ArrayAdapter<Peer> {
 
     }
 
-    class PeerLongClickListner implements View.OnLongClickListener {
+    class PeerLongClickListener implements View.OnLongClickListener {
         Peer peer;
         MainActivity ownerActivity;
         View ownerView;
 
-        public PeerLongClickListner(Peer peer, MainActivity ownerActivity, View ownerView) {
+        public PeerLongClickListener(Peer peer, MainActivity ownerActivity, View ownerView) {
             this.peer = peer;
             this.ownerActivity = ownerActivity;
             this.ownerView = ownerView;

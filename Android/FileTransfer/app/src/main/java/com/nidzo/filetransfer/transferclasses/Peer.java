@@ -8,11 +8,11 @@ public class Peer {
     private String name;
     @StringAttribute(name = Strings.JSON_GUID)
     private String guid;
-    @StringAttribute(name = Strings.JSON_PUBLICKEY)
+    @StringAttribute(name = Strings.JSON_PUBLICKEY, required = false)
     private String publicKey;
-    @StringAttribute(name = Strings.JSON_PRIVATEKEY)
+    @StringAttribute(name = Strings.JSON_PRIVATEKEY, required = false)
     private String myPrivateKey;
-    @StringAttribute(name = "SHAREDPASSWORD")
+    @StringAttribute(name = "SHAREDPASSWORD", required = false)
     private String sharedPassword;
     private String IP;
 
@@ -62,5 +62,9 @@ public class Peer {
     public void unpair()
     {
         sharedPassword=publicKey=myPrivateKey=null;
+    }
+    public boolean isPaired()
+    {
+        return sharedPassword!=null && publicKey!=null && myPrivateKey!=null;
     }
 }

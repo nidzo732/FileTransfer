@@ -134,28 +134,30 @@ public class FileHandling {
     }
 
     public String getFileName(Intent result) {
-        Uri fileUri = result.getData();
+        Uri fileUri;
+        if (result.getData() != null) fileUri = result.getData();
+        else fileUri = result.getParcelableExtra(Intent.EXTRA_STREAM);
         return getFileName(fileUri, owner);
     }
 
     public byte[] getFileContents(Intent result) throws FileTransferException {
-        Uri fileUri = result.getData();
-        long fileSize = FileHandling.getFileSize(fileUri, owner);
-        if (fileSize > MAX_FILE_LENGTH) {
-            throw new FileTransferException("File too big");
-        }
+        Uri fileUri;
+        if (result.getData() != null) fileUri = result.getData();
+        else fileUri = result.getParcelableExtra(Intent.EXTRA_STREAM);
+
         try {
             InputStream fileStream = owner.getContentResolver().openInputStream(fileUri);
 
-            byte[] buffer = new byte[(int) fileSize + CHUNK_READ_LENGTH + 1];
+            byte[] buffer = new byte[(int) MAX_FILE_LENGTH + CHUNK_READ_LENGTH + 1];
             int fileLength = 0;
             int bytesAdded = 0;
             while (bytesAdded != -1) {
-                bytesAdded = fileStream.read(buffer, fileLength, CHUNK_READ_LENGTH);
                 fileLength += bytesAdded;
                 if (fileLength > MAX_FILE_LENGTH) throw new IOException("File too big");
+                bytesAdded = fileStream.read(buffer, fileLength, CHUNK_READ_LENGTH);
             }
             byte[] fileContents = new byte[fileLength];
+
             System.arraycopy(buffer, 0, fileContents, 0, fileLength);
             return fileContents;
         } catch (IOException error) {
