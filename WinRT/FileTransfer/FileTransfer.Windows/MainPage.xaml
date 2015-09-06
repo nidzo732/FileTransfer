@@ -38,6 +38,7 @@
             <RowDefinition Height="140"/>
             <RowDefinition Height="50"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="50"/>
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
@@ -79,5 +80,6 @@
             </ListView.ItemTemplate>
         </ListView>
         <Button Content="Find devices" Grid.Column="1" Grid.Row="1" HorizontalAlignment="Stretch" Margin="5" VerticalAlignment="Stretch" Click="refreshPeerList"/>
+        <CheckBox Grid.Row="3" x:Name="enableEncryption" Content="Enable encryption" Margin="10,0,0,0"/>
     </Grid>
 </Page>

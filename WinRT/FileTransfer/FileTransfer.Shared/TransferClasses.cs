@@ -20,6 +20,12 @@ namespace FileTransfer
         public PublicKey key;
     }
     [DataContract]
+    public class PreSendRequestNoCrypt
+    {
+        [DataMember(Name = Strings.JSON_FILE_NAME)]
+        public string FileName;
+    }
+    [DataContract]
     public class PublicKey
     {
         [DataMember(Name=Strings.JSON_PUBLICKEY)]
@@ -68,9 +74,18 @@ namespace FileTransfer
             FileName = fileName;
 
         }
+        public File(string fileName, byte[] fileContents)
+        {
+            Contents = Cryptography.TextManipulation.Encode64(fileContents);
+            FileName = fileName;
+        }
         public byte[] GetContents(byte[] aesKey)
         {
             return Cryptography.AES.Decrypt(Contents, aesKey);
+        }
+        public byte[] GetContents()
+        {
+            return Cryptography.TextManipulation.Decode64(Contents);
         }
     }
 }

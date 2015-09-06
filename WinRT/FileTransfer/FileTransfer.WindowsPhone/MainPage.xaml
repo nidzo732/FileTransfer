@@ -32,6 +32,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Title Panel -->
@@ -60,5 +61,6 @@
                 </ListView.ItemTemplate>
             </ListView>
         </Grid>
+        <CheckBox Grid.Row="3" x:Name="enableEncryption" Content="Enable encryption" Margin="10,0,0,0"/>
     </Grid>
 </Page>

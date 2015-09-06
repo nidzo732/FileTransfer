@@ -1,16 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
+using Windows.ApplicationModel.DataTransfer.ShareTarget;
 using Windows.Networking.Connectivity;
 using Windows.Storage;
-using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Navigation;
-using System.Runtime.InteropServices.WindowsRuntime;
-using Windows.ApplicationModel.DataTransfer.ShareTarget;
 
 namespace FileTransfer
 {
@@ -142,7 +139,14 @@ namespace FileTransfer
             else
             {
                 byte[] fileContents = (await FileIO.ReadBufferAsync(file)).ToArray();
-                await Communicator.SendFile(file.Name, fileContents, peer);
+                if ((bool)enableEncryption.IsChecked)
+                {
+                    await Communicator.SendFile(file.Name, fileContents, peer);
+                }
+                else
+                {
+                    await Communicator.SendFileNoCrypt(file.Name, fileContents, peer);
+                }
             }
         }
 

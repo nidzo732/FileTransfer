@@ -3,7 +3,6 @@ using FileTransfer.Networking;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Text;
 using System.Threading.Tasks;
 using Windows.UI.Core;
 
@@ -14,6 +13,7 @@ namespace FileTransfer
         public static ObservableCollection<Peer> Peers;
         private static Dictionary<string, Peer> peerMap;
         private static Dictionary<string, PreSendRequest> preSendRegistrations;
+        private static Dictionary<string, PreSendRequestNoCrypt> preSendRegistrationsNoCrypt;
         private static string myName;
         private static TCPSocket listenerSocket;
         private static Dictionary<string, Func<string, string, TCPSocket, Task>> requestHandlerMap;
@@ -30,6 +30,7 @@ namespace FileTransfer
             myName = name;
             Peers = new ObservableCollection<Peer>();
             preSendRegistrations = new Dictionary<string, PreSendRequest>();
+            preSendRegistrationsNoCrypt = new Dictionary<string, PreSendRequestNoCrypt>();
             listenerSocket = new TCPSocket();
             listenerSocket.ConnectionReceived += requestReceived;
             initializeHandlerMap();
@@ -152,6 +153,8 @@ namespace FileTransfer
             requestHandlerMap[Strings.REQUEST_TYPE_PAIR] = pairRequestReceived;
             requestHandlerMap[Strings.REQUEST_TYPE_PRE_SEND] = preSendRequestReceived;
             requestHandlerMap[Strings.REQUEST_TYPE_SEND] = fileReceived;
+            requestHandlerMap[Strings.REQUEST_TYPE_PRE_SEND_NOCRYPT] = preSendNoCryptRequestReceived;
+            requestHandlerMap[Strings.REQUEST_TYPE_SEND_NOCRYPT] = fileReceivedNoCrypt;
         }
         private async static Task pairRequestReceived(string peer, string data, TCPSocket socket)
         {
@@ -330,6 +333,44 @@ namespace FileTransfer
                 progressStop();
             }
         }
+        public async static Task SendFileNoCrypt(string fileName, byte[] fileContents, string peer)
+        {
+            try
+            {
+                progressIndeterminate();
+                PreSendRequestNoCrypt preSend = new PreSendRequestNoCrypt();
+                preSend.FileName = fileName;
+                var preSendSocket = await sendRequestToPeer(peer, Strings.REQUEST_TYPE_PRE_SEND_NOCRYPT, JSONHandling.SerializeObject(preSend), timeout: 0);
+                var response = await preSendSocket.Recv();
+                if (response == Strings.RESPONSE_NOT_PAIRED)
+                {
+                    if (!(await Pair(peer))) return;
+                    await SendFile(fileName, fileContents, peer);
+                    return;
+                }
+                else if (response == Strings.RESPONSE_REJECT)
+                {
+                    await DialogBoxes.ShowMessageBox("File rejected");
+                    progressStop();
+                    return;
+                }
+                File sentFile = new File(fileName, fileContents);
+                await sendRequestToPeer(peer, Strings.REQUEST_TYPE_SEND_NOCRYPT, JSONHandling.SerializeObject(sentFile), true);
+                progressStop();
+            }
+            catch (FileTransferException error)
+            {
+                DialogBoxes.ShowMessageBox(error.Message);
+            }
+            catch (Exception error)
+            {
+                DialogBoxes.ShowMessageBox("Unknown error: " + error.Message);
+            }
+            finally
+            {
+                progressStop();
+            }
+        }
         private async static Task fileReceived(string peer, string data, TCPSocket socket)
         {
             progressIndeterminate();
@@ -359,6 +400,34 @@ namespace FileTransfer
             FileReceived(receivedFile.FileName, fileContents);
         }
 
+        private async static Task fileReceivedNoCrypt(string peer, string data, TCPSocket socket)
+        {
+            progressIndeterminate();
+            if (!(peerMap.ContainsKey(peer) && peerMap[peer].Paired))
+            {
+                progressStop();
+                await socket.Send(Strings.RESPONSE_NOT_PAIRED);
+                return;
+            }
+            if (!(preSendRegistrationsNoCrypt.ContainsKey(peer)))
+            {
+                progressStop();
+                await socket.Send(Strings.RESPONSE_REJECT);
+                return;
+            }
+            PreSendRequestNoCrypt registration = preSendRegistrationsNoCrypt[peer];
+            preSendRegistrationsNoCrypt.Remove(peer);
+            File receivedFile = JSONHandling.ParseJSONResponse<File>(data);
+            if (receivedFile.FileName != registration.FileName)
+            {
+                progressStop();
+                throw new FileTransferException("File name mismatch");
+            }
+            byte[] fileContents = receivedFile.GetContents();
+            progressStop();
+            FileReceived(receivedFile.FileName, fileContents);
+        }
+
         private async static Task preSendRequestReceived(string peer, string data, TCPSocket socket)
         {
             if(peerMap.ContainsKey(peer) && peerMap[peer].Paired)
@@ -371,6 +440,26 @@ namespace FileTransfer
                 await DialogBoxes.AskForConfirmation(registration.FileName+" from "+peerMap[peer].Name+". Accept?", async () =>
                 {
                     preSendRegistrations[peer] = registration;
+                    await socket.Send(Strings.RESPONSE_OK);
+                }, async () =>
+                {
+                    await socket.Send(Strings.RESPONSE_REJECT);
+                });
+            }
+            else
+            {
+                await socket.Send(Strings.RESPONSE_NOT_PAIRED);
+            }
+        }
+
+        private async static Task preSendNoCryptRequestReceived(string peer, string data, TCPSocket socket)
+        {
+            if (peerMap.ContainsKey(peer) && peerMap[peer].Paired)
+            {
+                PreSendRequestNoCrypt registration = JSONHandling.ParseJSONResponse<PreSendRequestNoCrypt>(data);
+                await DialogBoxes.AskForConfirmation(registration.FileName + " from " + peerMap[peer].Name + " over insecure connection. Accept?", async () =>
+                {
+                    preSendRegistrationsNoCrypt[peer] = registration;
                     await socket.Send(Strings.RESPONSE_OK);
                 }, async () =>
                 {
