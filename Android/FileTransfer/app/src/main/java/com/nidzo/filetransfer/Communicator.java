@@ -11,6 +11,7 @@ import com.nidzo.filetransfer.transferclasses.File;
 import com.nidzo.filetransfer.transferclasses.PairingRequest;
 import com.nidzo.filetransfer.transferclasses.Peer;
 import com.nidzo.filetransfer.transferclasses.PreSendRequest;
+import com.nidzo.filetransfer.transferclasses.PreSendRequestNoCrypt;
 import com.nidzo.filetransfer.transferclasses.PublicKey;
 import com.nidzo.filetransfer.transferclasses.Request;
 
@@ -26,7 +27,8 @@ public class Communicator {
     private HashMap<String, Peer> peers;
     private MulticastDiscovery discovery;
     private TCPSocket listenerSocket;
-    private Hashtable<String, PreSendRequest> preSendRegistrations;
+    private final Hashtable<String, PreSendRequest> preSendRegistrations;
+    private final Hashtable<String, PreSendRequestNoCrypt> preSendNoCryptRegistrations;
     private FileHandling fileHandling;
     private Hashtable<String, RequestHandler> requestHandlers;
     private RequestHandler pairingHandler = new RequestHandler() {
@@ -96,9 +98,37 @@ public class Communicator {
             if (!acceptFile) {
                 socket.send(Strings.RESPONSE_REJECT);
             } else {
-                preSendRegistrations.remove(request.getSenderGuid());
-                preSendRegistrations.put(request.getSenderGuid(), receivedRequest);
-                socket.send(Strings.RESPONSE_OK);
+                synchronized (preSendRegistrations) {
+                    preSendRegistrations.remove(request.getSenderGuid());
+                    preSendRegistrations.put(request.getSenderGuid(), receivedRequest);
+                    socket.send(Strings.RESPONSE_OK);
+                }
+            }
+            progressStop();
+        }
+    };
+    private RequestHandler preSendNoCryptHandler = new RequestHandler() {
+        @Override
+        public void handle(TCPSocket socket, Request request) throws FileTransferException {
+            if ((!peers.containsKey(request.getSenderGuid())) || (!peers.get(request.getSenderGuid()).isPaired())) {
+                socket.send(Strings.RESPONSE_NOT_PAIRED);
+                return;
+            }
+            PreSendRequestNoCrypt receivedRequest = new PreSendRequestNoCrypt();
+            JSONHandling.deserializeObject(request.getData(), receivedRequest);
+            progressIndeterminate();
+            boolean acceptFile = DialogBoxes.showConfirmationBox("File received",
+                    "Accept file '" + receivedRequest.getFileName() + "' from " + peers.get(request.getSenderGuid()).getName()
+                            +" over insecure connection",
+                    owner);
+            if (!acceptFile) {
+                socket.send(Strings.RESPONSE_REJECT);
+            } else {
+                synchronized (preSendNoCryptRegistrations) {
+                    preSendNoCryptRegistrations.remove(request.getSenderGuid());
+                    preSendNoCryptRegistrations.put(request.getSenderGuid(), receivedRequest);
+                    socket.send(Strings.RESPONSE_OK);
+                }
             }
             progressStop();
         }
@@ -111,10 +141,12 @@ public class Communicator {
                 progressStop();
                 return;
             }
-            if (!preSendRegistrations.containsKey(request.getSenderGuid())) {
-                notifyError("No pre-send registration");
-                progressStop();
-                return;
+            synchronized (preSendRegistrations) {
+                if (!preSendRegistrations.containsKey(request.getSenderGuid())) {
+                    notifyError("No pre-send registration");
+                    progressStop();
+                    return;
+                }
             }
             progressIndeterminate();
             PreSendRequest registration = preSendRegistrations.get(request.getSenderGuid());
@@ -137,6 +169,40 @@ public class Communicator {
             }
         }
     };
+    private RequestHandler sendNoCryptHandler = new RequestHandler() {
+        @Override
+        public void handle(TCPSocket socket, Request request) throws FileTransferException {
+            if ((!peers.containsKey(request.getSenderGuid())) || (!peers.get(request.getSenderGuid()).isPaired())) {
+                notifyError("Not paired");
+                progressStop();
+                return;
+            }
+            synchronized (preSendNoCryptRegistrations) {
+                if (!preSendNoCryptRegistrations.containsKey(request.getSenderGuid())) {
+                    notifyError("No pre-send registration");
+                    progressStop();
+                    return;
+                }
+            }
+            progressIndeterminate();
+            PreSendRequestNoCrypt registration = preSendNoCryptRegistrations.get(request.getSenderGuid());
+            preSendNoCryptRegistrations.remove(request.getSenderGuid());
+            File receivedFile = new File();
+            JSONHandling.deserializeObject(request.getData(), receivedFile);
+            if (!receivedFile.getFileName().equals(registration.getFileName())) {
+                notifyError("Name mismatch, rejected");
+                progressStop();
+                return;
+            }
+            byte[] fileContents = receivedFile.getFileContents();
+            java.io.File savedFile = fileHandling.saveFile(fileContents, receivedFile.getFileName());
+            progressStop();
+            if (DialogBoxes.showConfirmationBox("File received",
+                    "File received and saved to downloads folder. Do you want to try to open it?", owner)) {
+                owner.fileReceived(savedFile);
+            }
+        }
+    };
 
     public Communicator(MainActivity ownerActivity) throws FileTransferException {
         owner = ownerActivity;
@@ -144,6 +210,7 @@ public class Communicator {
         loadPeers();
         discovery = new MulticastDiscovery(ownerActivity, this);
         preSendRegistrations = new Hashtable<>();
+        preSendNoCryptRegistrations = new Hashtable<>();
         setRequestHandlers();
         startRequestListener();
     }
@@ -153,6 +220,8 @@ public class Communicator {
         requestHandlers.put(Strings.REQUEST_TYPE_PAIR, pairingHandler);
         requestHandlers.put(Strings.REQUEST_TYPE_PRE_SEND, preSendHandler);
         requestHandlers.put(Strings.REQUEST_TYPE_SEND, sendHandler);
+        requestHandlers.put(Strings.REQUEST_TYPE_PRE_SEND_NOCRYPT, preSendNoCryptHandler);
+        requestHandlers.put(Strings.REQUEST_TYPE_SEND_NOCRYPT, sendNoCryptHandler);
     }
 
     public void deletePeer(String guid) throws FileTransferException {
@@ -392,11 +461,12 @@ public class Communicator {
         }
     }
 
-    public void sendFile(final String guid, final Intent openFileResult) {
+    public void sendFile(final String guid, final Intent openFileResult, final boolean encrypted) {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                sendFileThread(guid, openFileResult);
+                if (encrypted) sendFileThread(guid, openFileResult);
+                else sendFileNoCryptThread(guid, openFileResult);
             }
         }).start();
     }
@@ -416,11 +486,38 @@ public class Communicator {
             if (!response.equals(Strings.RESPONSE_OK)) {
                 progressStop();
                 notifyError(response);
+                return;
             }
             String aesKey = DiffieHellman.calculateAESKey(filePrivateKey, selectedPeer.getPublicKey());
             File sentFile = new File(fileName, fileContents, aesKey);
             String sentFileString = JSONHandling.serializeObject(sentFile);
             sendRequestToPeer(guid, Strings.REQUEST_TYPE_SEND, sentFileString, 5000);
+        } catch (FileTransferException error) {
+            notifyError(error.toString() + "->" + error.getMessage());
+        }
+        catch (OutOfMemoryError error)
+        {
+            notifyError("File too big to fit in memory");
+        }
+        progressStop();
+    }
+
+    private void sendFileNoCryptThread(final String guid, final Intent openFileResult) {
+        try {
+            progressIndeterminate();
+            byte[] fileContents = fileHandling.getFileContents(openFileResult);
+            String fileName = fileHandling.getFileName(openFileResult);
+            PreSendRequestNoCrypt preSendRequest = new PreSendRequestNoCrypt(fileName);
+            TCPSocket preSendSocket = sendRequestToPeer(guid, Strings.REQUEST_TYPE_PRE_SEND_NOCRYPT, JSONHandling.serializeObject(preSendRequest), 0);
+            String response = preSendSocket.recv();
+            if (!response.equals(Strings.RESPONSE_OK)) {
+                progressStop();
+                notifyError(response);
+                return;
+            }
+            File sentFile = new File(fileName, fileContents);
+            String sentFileString = JSONHandling.serializeObject(sentFile);
+            sendRequestToPeer(guid, Strings.REQUEST_TYPE_SEND_NOCRYPT, sentFileString, 5000);
         } catch (FileTransferException error) {
             notifyError(error.toString() + "->" + error.getMessage());
         }

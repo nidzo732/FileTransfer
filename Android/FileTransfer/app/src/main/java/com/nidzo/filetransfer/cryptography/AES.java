@@ -1,5 +1,4 @@
 package com.nidzo.filetransfer.cryptography;
-import com.nidzo.filetransfer.FileTransferException;
 
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;

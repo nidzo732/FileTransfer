@@ -8,6 +8,7 @@ import android.text.TextWatcher;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -22,6 +23,7 @@ public class MainActivity extends AppCompatActivity {
     private FileHandling fileHandling;
     private String selectedPeerGuid;
     private Intent fileToSendIntent;
+    private CheckBox enableEncryption;
     private TextWatcher deviceNameChangedWatcher = new TextWatcher() {
         @Override
         public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -57,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
         peerList.setAdapter(peersAdapter);
         deviceName = (EditText) findViewById(R.id.deviceName);
         progressIndicator = (ProgressBar) findViewById(R.id.progressIndicator);
+        enableEncryption = (CheckBox)findViewById(R.id.enableEncryptionCheckbox);
         progressStop();
         deviceName.setText(Identification.getName(this));
         deviceName.addTextChangedListener(deviceNameChangedWatcher);
@@ -142,7 +145,7 @@ public class MainActivity extends AppCompatActivity {
     public void sendFile(String guid) {
         selectedPeerGuid = guid;
         if (fileToSendIntent != null) {
-            communicator.sendFile(guid, fileToSendIntent);
+            communicator.sendFile(guid, fileToSendIntent, enableEncryption.isChecked());
             fileToSendIntent = null;
         } else fileHandling.selectFileToSend();
     }
@@ -151,7 +154,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent result) {
         if (requestCode == FileHandling.FILE_SELECT_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
-                communicator.sendFile(selectedPeerGuid, result);
+                communicator.sendFile(selectedPeerGuid, result, enableEncryption.isChecked());
             }
         }
     }
