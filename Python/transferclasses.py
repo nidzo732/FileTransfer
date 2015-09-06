@@ -1,5 +1,5 @@
 from cryptography import generateSignature, verifySignature, generateDHPrivate, calculateDHPublic, calculateDHAES, \
-    AESEncrypt, AESDecrypt
+    AESEncrypt, AESDecrypt, decode64, encode64
 from strings import *
 
 
@@ -71,12 +71,18 @@ class File:
     jsonKeys = {"contents": JSON_FILE_CONTENTS,
                 "fileName": JSON_FILE_NAME}
 
-    def __init__(self, fileName, fileContents, aesKey):
-        self.contents = AESEncrypt(fileContents, aesKey)
+    def __init__(self, fileName, fileContents, aesKey=None):
+        if aesKey:
+            self.contents = AESEncrypt(fileContents, aesKey)
+        else:
+            self.contents = encode64(fileContents)
         self.fileName = fileName
 
     def getContents(self, aesKey):
         return AESDecrypt(self.contents, aesKey, False)
+
+    def getRawContents(self):
+        return decode64(self.contents)
 
 
 class PreSendRequest:
@@ -85,4 +91,11 @@ class PreSendRequest:
 
     def __init__(self, fileName, publicKey):
         self.publicKey = publicKey
+        self.fileName = fileName
+
+
+class PreSendRequestNoCrypt:
+    jsonKeys = {"fileName": JSON_FILE_NAME}
+
+    def __init__(self, fileName):
         self.fileName = fileName

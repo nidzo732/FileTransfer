@@ -40,7 +40,10 @@ class PeerOptionsUi(QtGui.QMainWindow):
             return
         fileContents = open(fileName, "rb").read()
         basename = os.path.basename(fileName)
-        self.communicator.sendFile(basename, fileContents, self.peer.guid)
+        if self.parentWindow.ui.enableEncryption.isChecked():
+            self.communicator.sendFile(basename, fileContents, self.peer.guid)
+        else:
+            self.communicator.sendFileNoCrypt(basename, fileContents, self.peer.guid)
         self.close()
 
     def deletePeer(self):

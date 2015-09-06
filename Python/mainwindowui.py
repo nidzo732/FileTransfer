@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'mainwindow.ui'
 #
-# Created: Mon Aug 10 22:38:46 2015
+# Created: Sun Sep  6 16:40:33 2015
 #      by: PyQt4 UI code generator 4.10.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -47,6 +47,9 @@ class Ui_MainWindow(object):
         self.peerList = QtGui.QListWidget(self.centralwidget)
         self.peerList.setObjectName(_fromUtf8("peerList"))
         self.verticalLayout.addWidget(self.peerList)
+        self.enableEncryption = QtGui.QCheckBox(self.centralwidget)
+        self.enableEncryption.setObjectName(_fromUtf8("enableEncryption"))
+        self.verticalLayout.addWidget(self.enableEncryption)
         self.gridLayout.addLayout(self.verticalLayout, 0, 0, 1, 1)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtGui.QMenuBar(MainWindow)
@@ -65,4 +68,5 @@ class Ui_MainWindow(object):
         MainWindow.setWindowTitle(_translate("MainWindow", "File transfer", None))
         self.myName.setPlaceholderText(_translate("MainWindow", "device name", None))
         self.refreshPeersButton.setText(_translate("MainWindow", "Refresh", None))
+        self.enableEncryption.setText(_translate("MainWindow", "Enable encryption", None))
 

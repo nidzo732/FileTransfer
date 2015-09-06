@@ -50,6 +50,13 @@
       <item>
        <widget class="QListWidget" name="peerList"/>
       </item>
+      <item>
+       <widget class="QCheckBox" name="enableEncryption">
+        <property name="text">
+         <string>Enable encryption</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
    </layout>
